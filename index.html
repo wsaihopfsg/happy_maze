@@ -1,0 +1,400 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>3D Maze Escape</title>
+    <style>
+        body { margin: 0; overflow: hidden; background: #000; font-family: 'Courier New', Courier, monospace; }
+        
+        /* UI Overlay */
+        #ui-layer {
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 100%;
+            pointer-events: none; /* Let touches pass through to joystick */
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+        }
+
+        #top-bar {
+            padding: 20px;
+            color: #0f0;
+            font-size: 24px;
+            text-shadow: 0 0 5px #0f0;
+            background: linear-gradient(to bottom, rgba(0,0,0,0.8), transparent);
+        }
+
+        /* Start / Game Over Screen */
+        #overlay {
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0, 0, 0, 0.9);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            z-index: 10;
+            pointer-events: auto;
+        }
+
+        button {
+            padding: 15px 30px;
+            font-size: 20px;
+            background: #0f0;
+            border: none;
+            color: #000;
+            cursor: pointer;
+            margin-top: 20px;
+            font-weight: bold;
+        }
+
+        /* Joystick Controls */
+        #joystick-zone {
+            position: absolute;
+            bottom: 50px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 150px;
+            height: 150px;
+            background: rgba(255, 255, 255, 0.1);
+            border: 2px solid rgba(255, 255, 255, 0.3);
+            border-radius: 50%;
+            pointer-events: auto; /* Catch touch events */
+            touch-action: none;
+        }
+
+        #joystick-knob {
+            position: absolute;
+            top: 50%; left: 50%;
+            width: 50px; height: 50px;
+            background: rgba(0, 255, 0, 0.5);
+            border-radius: 50%;
+            transform: translate(-50%, -50%);
+            pointer-events: none;
+        }
+    </style>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+</head>
+<body>
+
+    <div id="overlay">
+        <h1 id="status-text">MAZE ESCAPE</h1>
+        <p>Find the <span style="color:red">RED</span> pillar.</p>
+        <button id="start-btn">START GAME</button>
+    </div>
+
+    <div id="ui-layer">
+        <div id="top-bar">
+            TIME: <span id="timer">60</span>s
+        </div>
+        <div id="joystick-zone">
+            <div id="joystick-knob"></div>
+        </div>
+    </div>
+
+    <script>
+        // --- CONFIGURATION ---
+        const TILE_SIZE = 10;
+        const WALL_HEIGHT = 10;
+        const MOVEMENT_SPEED = 0.3;
+        const ROTATION_SPEED = 0.04;
+        const MAZE_SIZE = 15; // 15x15 Grid
+
+        // --- GLOBAL VARIABLES ---
+        let camera, scene, renderer;
+        let player = { x: 0, z: 0, rotation: 0 };
+        let joystick = { active: false, dx: 0, dy: 0, originX: 0, originY: 0 };
+        let mazeMap = [];
+        let walls = [];
+        let gameActive = false;
+        let timeLeft = 60;
+        let timerInterval;
+        let audioCtx;
+        
+        // DOM Elements
+        const knob = document.getElementById('joystick-knob');
+        const zone = document.getElementById('joystick-zone');
+        const timerDisplay = document.getElementById('timer');
+        const overlay = document.getElementById('overlay');
+        const statusText = document.getElementById('status-text');
+        const startBtn = document.getElementById('start-btn');
+
+        // --- INITIALIZATION ---
+        init3D();
+        generateMaze();
+        setupJoystick();
+
+        startBtn.addEventListener('click', startGame);
+
+        function startGame() {
+            // Reset State
+            timeLeft = 60;
+            gameActive = true;
+            timerDisplay.innerText = timeLeft;
+            overlay.style.display = 'none';
+            
+            // Reset Player Position (Find a '0' spot in top left)
+            player.x = TILE_SIZE * 1.5;
+            player.z = TILE_SIZE * 1.5;
+            player.rotation = 0;
+
+            // Audio
+            initAudio();
+
+            // Start Loops
+            clearInterval(timerInterval);
+            timerInterval = setInterval(() => {
+                if(!gameActive) return;
+                timeLeft--;
+                timerDisplay.innerText = timeLeft;
+                if(timeLeft <= 0) endGame(false);
+            }, 1000);
+
+            animate();
+        }
+
+        function endGame(win) {
+            gameActive = false;
+            overlay.style.display = 'flex';
+            statusText.innerText = win ? "YOU ESCAPED!" : "TIME UP!";
+            statusText.style.color = win ? "#0f0" : "#f00";
+            startBtn.innerText = "TRY AGAIN";
+            if(audioCtx) audioCtx.close();
+        }
+
+        // --- 3D SETUP (Three.js) ---
+        function init3D() {
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x111111);
+            scene.fog = new THREE.Fog(0x111111, 0, 40);
+
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+            
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            document.body.appendChild(renderer.domElement);
+
+            // Lighting
+            const ambientLight = new THREE.AmbientLight(0x404040);
+            scene.add(ambientLight);
+            const pointLight = new THREE.PointLight(0xffffff, 1, 100);
+            camera.add(pointLight); // Light follows player
+            scene.add(camera);
+
+            // Floor
+            const floorGeo = new THREE.PlaneGeometry(2000, 2000);
+            const floorMat = new THREE.MeshBasicMaterial({ color: 0x222222 });
+            const floor = new THREE.Mesh(floorGeo, floorMat);
+            floor.rotation.x = -Math.PI / 2;
+            scene.add(floor);
+            
+            // Ceiling
+            const ceilGeo = new THREE.PlaneGeometry(2000, 2000);
+            const ceilMat = new THREE.MeshBasicMaterial({ color: 0x111111 });
+            const ceiling = new THREE.Mesh(ceilGeo, ceilMat);
+            ceiling.rotation.x = Math.PI / 2;
+            ceiling.position.y = WALL_HEIGHT;
+            scene.add(ceiling);
+        }
+
+        // --- MAZE GENERATION ---
+        function generateMaze() {
+            // 1 = Wall, 0 = Path, 2 = Goal
+            // Simple manual map generation logic for demo purposes
+            // Create a grid full of walls
+            for(let z=0; z<MAZE_SIZE; z++) {
+                let row = [];
+                for(let x=0; x<MAZE_SIZE; x++) {
+                    // Borders are walls
+                    if (x===0 || x===MAZE_SIZE-1 || z===0 || z===MAZE_SIZE-1) {
+                        row.push(1);
+                    } else {
+                        // Random walls (density)
+                        row.push(Math.random() > 0.7 ? 1 : 0);
+                    }
+                }
+                mazeMap.push(row);
+            }
+
+            // Clear start area
+            mazeMap[1][1] = 0; mazeMap[1][2] = 0; mazeMap[2][1] = 0;
+            
+            // Set Goal (Bottom Right)
+            mazeMap[MAZE_SIZE-2][MAZE_SIZE-2] = 2;
+
+            // Build Meshes
+            const wallGeo = new THREE.BoxGeometry(TILE_SIZE, WALL_HEIGHT, TILE_SIZE);
+            const wallMat = new THREE.MeshLambertMaterial({ color: 0x00ffcc }); // Cyan walls
+            const goalMat = new THREE.MeshLambertMaterial({ color: 0xff0000 }); // Red goal
+
+            for(let z=0; z<MAZE_SIZE; z++) {
+                for(let x=0; x<MAZE_SIZE; x++) {
+                    if(mazeMap[z][x] === 1) {
+                        const wall = new THREE.Mesh(wallGeo, wallMat);
+                        wall.position.set(x * TILE_SIZE, WALL_HEIGHT/2, z * TILE_SIZE);
+                        scene.add(wall);
+                    } else if (mazeMap[z][x] === 2) {
+                        // Goal Marker
+                        const goal = new THREE.Mesh(new THREE.CylinderGeometry(1, 1, WALL_HEIGHT, 16), goalMat);
+                        goal.position.set(x * TILE_SIZE, WALL_HEIGHT/2, z * TILE_SIZE);
+                        scene.add(goal);
+                    }
+                }
+            }
+        }
+
+        // --- GAME LOOP & LOGIC ---
+        function animate() {
+            if(!gameActive) return;
+            requestAnimationFrame(animate);
+
+            // Handle Movement
+            if (joystick.active) {
+                // Joystick Y controls Forward/Back speed
+                // Joystick X controls Rotation
+                const moveSpeed = -(joystick.dy / 75) * MOVEMENT_SPEED; 
+                const turnSpeed = -(joystick.dx / 75) * ROTATION_SPEED;
+
+                player.rotation += turnSpeed;
+
+                const nextX = player.x - Math.sin(player.rotation) * moveSpeed;
+                const nextZ = player.z - Math.cos(player.rotation) * moveSpeed;
+
+                // Collision Detection (Grid based)
+                const gridX = Math.floor((nextX + TILE_SIZE/2) / TILE_SIZE);
+                const gridZ = Math.floor((nextZ + TILE_SIZE/2) / TILE_SIZE);
+
+                // Prevent moving into wall (1)
+                // Simple check: if target cell is wall, don't move. 
+                // Enhanced check: slide against walls (check axis separately)
+                
+                let canMoveX = true;
+                let canMoveZ = true;
+
+                if(mazeMap[Math.floor((player.z + TILE_SIZE/2)/TILE_SIZE)][Math.floor((nextX + TILE_SIZE/2)/TILE_SIZE)] === 1) canMoveX = false;
+                if(mazeMap[Math.floor((nextZ + TILE_SIZE/2)/TILE_SIZE)][Math.floor((player.x + TILE_SIZE/2)/TILE_SIZE)] === 1) canMoveZ = false;
+
+                if(canMoveX) player.x = nextX;
+                if(canMoveZ) player.z = nextZ;
+
+                // Win Condition
+                if(mazeMap[gridZ][gridX] === 2) {
+                    endGame(true);
+                }
+            }
+
+            // Update Camera
+            camera.position.set(player.x, WALL_HEIGHT/2, player.z);
+            camera.rotation.y = player.rotation;
+            
+            renderer.render(scene, camera);
+        }
+
+        // --- JOYSTICK LOGIC ---
+        function setupJoystick() {
+            const handleStart = (x, y) => {
+                joystick.active = true;
+                joystick.originX = x;
+                joystick.originY = y;
+                knob.style.transition = 'none';
+            };
+
+            const handleMove = (x, y) => {
+                if (!joystick.active) return;
+                
+                let dx = x - joystick.originX;
+                let dy = y - joystick.originY;
+                
+                // Limit distance to 75px radius
+                const distance = Math.sqrt(dx*dx + dy*dy);
+                const maxDist = 75;
+                if(distance > maxDist) {
+                    dx = (dx / distance) * maxDist;
+                    dy = (dy / distance) * maxDist;
+                }
+
+                joystick.dx = dx;
+                joystick.dy = dy;
+
+                knob.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px))`;
+            };
+
+            const handleEnd = () => {
+                joystick.active = false;
+                joystick.dx = 0;
+                joystick.dy = 0;
+                knob.style.transition = '0.2s';
+                knob.style.transform = `translate(-50%, -50%)`;
+            };
+
+            // Touch Events
+            zone.addEventListener('touchstart', e => {
+                e.preventDefault();
+                handleStart(e.touches[0].clientX, e.touches[0].clientY);
+            });
+            zone.addEventListener('touchmove', e => {
+                e.preventDefault();
+                handleMove(e.touches[0].clientX, e.touches[0].clientY);
+            });
+            zone.addEventListener('touchend', handleEnd);
+
+            // Mouse Events (for desktop testing)
+            zone.addEventListener('mousedown', e => handleStart(e.clientX, e.clientY));
+            window.addEventListener('mousemove', e => handleMove(e.clientX, e.clientY));
+            window.addEventListener('mouseup', handleEnd);
+        }
+
+        // --- PROCEDURAL AUDIO ---
+        function initAudio() {
+            const AudioContext = window.AudioContext || window.webkitAudioContext;
+            audioCtx = new AudioContext();
+
+            // Simple Bass Loop
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+            
+            osc.type = 'sawtooth';
+            osc.frequency.value = 110; // A2
+            
+            // Filter to make it sound muffled/ambient
+            const filter = audioCtx.createBiquadFilter();
+            filter.type = 'lowpass';
+            filter.frequency.value = 400;
+
+            osc.connect(filter);
+            filter.connect(gain);
+            gain.connect(audioCtx.destination);
+            
+            osc.start();
+
+            // Sequencer loop
+            let beat = 0;
+            setInterval(() => {
+                if(!gameActive) {
+                    gain.gain.value = 0;
+                    return;
+                }
+                const time = audioCtx.currentTime;
+                // Simple Arpeggio
+                const notes = [110, 130.81, 164.81, 196]; // Am7 chord
+                osc.frequency.setValueAtTime(notes[beat % 4], time);
+                
+                // Envelope
+                gain.gain.setValueAtTime(0.1, time);
+                gain.gain.exponentialRampToValueAtTime(0.001, time + 0.5);
+                
+                beat++;
+            }, 500);
+        }
+
+        // Resize handler
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+    </script>
+</body>
+</html>
