@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>3D Maze Escape Deluxe</title>
+    <title>3D Maze Escape Fixed</title>
     <style>
         /* General Resets */
         body, html { margin: 0; padding: 0; overflow: hidden; background: #000; font-family: 'Courier New', Courier, monospace; height: 100%; width: 100%; }
@@ -24,10 +24,10 @@
             box-sizing: border-box;
         }
 
-        /* Show warning only in portrait mode on narrow devices */
+        /* Show warning only in portrait mode on mobile */
         @media screen and (orientation: portrait) and (max-width: 768px) {
             #portrait-warning { display: flex; }
-            #game-container { display: none; }
+            #game-container { visibility: hidden; }
         }
 
         /* --- GAME UI --- */
@@ -44,7 +44,6 @@
             display: flex;
             flex-direction: column;
             justify-content: space-between;
-            /* Ensure UI doesn't block look controls */
             touch-action: none; 
         }
 
@@ -62,6 +61,7 @@
             color: rgba(255,255,255,0.5);
             font-size: 14px;
             margin-bottom: 10px;
+            text-shadow: 1px 1px 2px black;
         }
 
         /* --- OVERLAYS --- */
@@ -79,8 +79,8 @@
         }
 
         button {
-            padding: 15px 30px;
-            font-size: 20px;
+            padding: 20px 40px;
+            font-size: 24px;
             background: #0f0;
             border: none;
             color: #000;
@@ -88,34 +88,33 @@
             margin-top: 20px;
             font-weight: bold;
             border-radius: 5px;
+            box-shadow: 0 0 10px #0f0;
         }
         button:active { background: #0a0; }
 
         /* --- CONTROLS --- */
-        /* The area that captures look gestures */
         #touch-surface {
              position: absolute;
              top:0; left:0; width:100%; height:100%;
              pointer-events: auto;
-             touch-action: none; /* Prevent browser scrolling */
+             touch-action: none; 
+             z-index: 1;
         }
 
         #joystick-zone-wrapper {
-            pointer-events: none; /* Wrapper lets clicks pass */
+            pointer-events: none;
             position: absolute;
-            bottom: 30px;
-            left: 30px;
-            /* Ensure joystick sits above the touch surface */
-            z-index: 5; 
+            bottom: 40px;
+            left: 40px;
+            z-index: 20; /* High z-index to sit on top */
         }
 
         #joystick-zone {
-            width: 150px;
-            height: 150px;
-            background: rgba(255, 255, 255, 0.1);
-            border: 2px solid rgba(255, 255, 255, 0.3);
+            width: 140px;
+            height: 140px;
+            background: rgba(255, 255, 255, 0.15);
+            border: 2px solid rgba(255, 255, 255, 0.4);
             border-radius: 50%;
-            /* Enable pointer events just for the joystick itself */
             pointer-events: auto; 
             touch-action: none;
             position: relative;
@@ -125,7 +124,7 @@
             position: absolute;
             top: 50%; left: 50%;
             width: 50px; height: 50px;
-            background: rgba(0, 255, 0, 0.5);
+            background: rgba(0, 255, 0, 0.6);
             border-radius: 50%;
             transform: translate(-50%, -50%);
             pointer-events: none;
@@ -138,11 +137,7 @@
     <div id="portrait-warning">
         <h1>ROTATE DEVICE</h1>
         <p>Please use Landscape Mode to play.</p>
-        <svg width="100" height="100" viewBox="0 0 24 24" fill="none" stroke="#ff9900" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M12 3a9 9 0 1 0 9 9"></path>
-            <path d="M12 3v9"></path>
-            <path d="M16.3 9.3L12 13.6l-4.3-4.3"></path>
-        </svg>
+        <div style="font-size: 50px; transform: rotate(90deg);">📱</div>
     </div>
 
     <div id="game-container">
@@ -157,7 +152,7 @@
 
         <div id="ui-layer">
             <div id="top-bar">TIME: <span id="timer">75</span>s</div>
-            <div id="look-hint">Drag outside joystick to turn head</div>
+            <div id="look-hint">Drag right side to look around</div>
             <div id="joystick-zone-wrapper">
                 <div id="joystick-zone">
                     <div id="joystick-knob"></div>
@@ -170,15 +165,14 @@
         // --- CONFIGURATION ---
         const TILE_SIZE = 10;
         const WALL_HEIGHT = 12;
-        const MOVEMENT_SPEED = 0.4; // Forward/back speed
-        const TURN_SPEED_JOYSTICK = 0.03; // Turning while moving
-        const TURN_SPEED_TOUCH = 0.005; // Turning via drag
+        const MOVEMENT_SPEED = 0.4;
+        const TURN_SPEED_JOYSTICK = 0.03;
+        const TURN_SPEED_TOUCH = 0.005;
         const MAZE_SIZE = 15; 
-        const PLAYER_RADIUS = TILE_SIZE * 0.3; // For collision
+        const PLAYER_RADIUS = TILE_SIZE * 0.25; 
 
         // --- GLOBAL VARIABLES ---
         let camera, scene, renderer;
-        // Player position is in world coordinates
         let player = { x: TILE_SIZE*1.5, z: TILE_SIZE*1.5, rotation: 0 };
         let goalPos = {gridX: 0, gridZ: 0};
         let startPos = {gridX: 1, gridZ: 1};
@@ -189,7 +183,7 @@
 
         // Game State
         let mazeMap = [];
-        let hintObjects = []; // Array to store light meshes used for hints
+        let hintObjects = []; 
         let gameActive = false;
         let timeLeft = 75;
         let timerInterval;
@@ -206,43 +200,49 @@
 
         // --- MAIN INIT ---
         init3D();
-        // Generate maze immediately so we have something to render initially
         generateMaze(); 
         setupControls();
 
         startBtn.addEventListener('click', startGame);
 
-        // --- GAME LIFECYCLE ---
         function startGame() {
-            // 1. Reset State
-            timeLeft = 75;
-            gameActive = true;
-            timerDisplay.innerText = timeLeft;
-            overlay.style.display = 'none';
-            
-            // 2. Reset Player Position to default start
-            player.x = (startPos.gridX + 0.5) * TILE_SIZE;
-            player.z = (startPos.gridZ + 0.5) * TILE_SIZE;
-            player.rotation = 0;
-
-            // 3. Regenerate Maze and Hints for a new game
-            clearScene();
-            generateMaze();
-            generateHints();
-
-            // 4. Audio
-            if(!audioCtx) initAudio();
-             if(audioCtx.state === 'suspended') audioCtx.resume();
-            mainGainNode.gain.setValueAtTime(0.1, audioCtx.currentTime); // Fade in music
-
-            // 5. Start Timers & Loop
-            clearInterval(timerInterval);
-            timerInterval = setInterval(() => {
-                if(!gameActive) return;
-                timeLeft--;
+            try {
+                // 1. Reset State
+                timeLeft = 75;
+                gameActive = true;
                 timerDisplay.innerText = timeLeft;
-                if(timeLeft <= 0) endGame(false);
-            }, 1000);
+                overlay.style.display = 'none';
+                
+                // 2. Reset Player Position
+                player.x = (startPos.gridX + 0.5) * TILE_SIZE;
+                player.z = (startPos.gridZ + 0.5) * TILE_SIZE;
+                player.rotation = 0;
+
+                // 3. Regenerate Maze
+                clearScene();
+                generateMaze();
+                generateHints();
+
+                // 4. Audio (Safe Mode)
+                try {
+                    if(!audioCtx) initAudio();
+                    if(audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+                    if(mainGainNode) mainGainNode.gain.setValueAtTime(0.1, audioCtx.currentTime);
+                } catch(e) {
+                    console.log("Audio disabled due to browser policy or error: ", e);
+                }
+
+                // 5. Start Timer
+                if(timerInterval) clearInterval(timerInterval);
+                timerInterval = setInterval(() => {
+                    if(!gameActive) return;
+                    timeLeft--;
+                    timerDisplay.innerText = timeLeft;
+                    if(timeLeft <= 0) endGame(false);
+                }, 1000);
+            } catch (err) {
+                alert("Game Error: " + err.message);
+            }
         }
 
         function endGame(win) {
@@ -253,16 +253,14 @@
             statusText.style.color = win ? "#0f0" : "#f00";
             startBtn.innerText = "PLAY AGAIN";
             
-            // Fade out music
-            if(mainGainNode) {
-                 mainGainNode.gain.setTargetAtTime(0, audioCtx.currentTime, 0.5);
+            if(mainGainNode && audioCtx) {
+                 try { mainGainNode.gain.setTargetAtTime(0, audioCtx.currentTime, 0.5); } catch(e){}
             }
         }
 
         // --- 3D SCENE SETUP ---
         function init3D() {
             scene = new THREE.Scene();
-            // Darker atmosphere
             scene.background = new THREE.Color(0x050505);
             scene.fog = new THREE.Fog(0x050505, 1, 35);
 
@@ -270,41 +268,35 @@
             
             renderer = new THREE.WebGLRenderer({ antialias: true });
             renderer.setSize(window.innerWidth, window.innerHeight);
-            renderer.shadowMap.enabled = true; // Enable shadows for depth
+            renderer.shadowMap.enabled = true; 
             document.getElementById('game-container').appendChild(renderer.domElement);
 
-            // Ambient light (very dim)
             const ambientLight = new THREE.AmbientLight(0x222222);
             scene.add(ambientLight);
 
-            // Player's flashlight
             const pointLight = new THREE.PointLight(0xffffff, 0.8, 40);
             pointLight.position.set(0, 2, 0);
             camera.add(pointLight);
             scene.add(camera);
 
-            // Textures (procedural for simplicity)
             const floorMat = new THREE.MeshStandardMaterial({ color: 0x333333, roughness: 0.8 });
             const ceilMat = new THREE.MeshBasicMaterial({ color: 0x111111 });
 
-            // Floor
             const floorGeo = new THREE.PlaneGeometry(MAZE_SIZE*TILE_SIZE*2, MAZE_SIZE*TILE_SIZE*2);
             const floor = new THREE.Mesh(floorGeo, floorMat);
             floor.rotation.x = -Math.PI / 2;
             floor.receiveShadow = true;
             scene.add(floor);
             
-            // Ceiling
             const ceiling = new THREE.Mesh(floorGeo, ceilMat);
             ceiling.rotation.x = Math.PI / 2;
             ceiling.position.y = WALL_HEIGHT;
             scene.add(ceiling);
 
-            animate(); // Start rendering loop immediately
+            animate(); 
         }
 
         function clearScene() {
-            // Remove old walls, goal, and hints
             for(let i = scene.children.length - 1; i >= 0; i--) {
                 let obj = scene.children[i];
                 if(obj.userData.isLevelObject) {
@@ -314,68 +306,57 @@
             hintObjects = [];
         }
 
-        // --- MAZE GENERATION & PATHFINDING ---
+        // --- MAZE & HINTS ---
         function generateMaze() {
             mazeMap = [];
             // 1 = Wall, 0 = Path, 2 = Goal
             for(let z=0; z<MAZE_SIZE; z++) {
                 let row = [];
                 for(let x=0; x<MAZE_SIZE; x++) {
-                    // Borders are walls
                     if (x===0 || x===MAZE_SIZE-1 || z===0 || z===MAZE_SIZE-1) {
                         row.push(1);
                     } else {
-                        // Simpler density-based generation
                         row.push(Math.random() > 0.75 ? 1 : 0);
                     }
                 }
                 mazeMap.push(row);
             }
 
-            // Ensure start area is clear
             mazeMap[startPos.gridZ][startPos.gridX] = 0;
             mazeMap[startPos.gridZ][startPos.gridX+1] = 0;
             mazeMap[startPos.gridZ+1][startPos.gridX] = 0;
 
-            // Set Goal and ensure it's reachable (by clearing neighbors)
             goalPos = {gridX: MAZE_SIZE-3, gridZ: MAZE_SIZE-3};
             mazeMap[goalPos.gridZ][goalPos.gridX] = 2;
             mazeMap[goalPos.gridZ-1][goalPos.gridX] = 0;
             mazeMap[goalPos.gridZ][goalPos.gridX-1] = 0;
 
-            // Build Meshes
             const wallGeo = new THREE.BoxGeometry(TILE_SIZE, WALL_HEIGHT, TILE_SIZE);
             const wallMat = new THREE.MeshStandardMaterial({ color: 0x445566, roughness: 0.9 });
-
             const goalGeo = new THREE.CylinderGeometry(TILE_SIZE/3, TILE_SIZE/3, WALL_HEIGHT, 16);
             const goalMat = new THREE.MeshStandardMaterial({ color: 0xff0000, emissive: 0x550000 });
 
             for(let z=0; z<MAZE_SIZE; z++) {
                 for(let x=0; x<MAZE_SIZE; x++) {
-                    let mesh;
                     if(mazeMap[z][x] === 1) {
-                        mesh = new THREE.Mesh(wallGeo, wallMat);
+                        const mesh = new THREE.Mesh(wallGeo, wallMat);
                         mesh.position.set((x+0.5) * TILE_SIZE, WALL_HEIGHT/2, (z+0.5) * TILE_SIZE);
                         mesh.castShadow = true;
-                        mesh.receiveShadow = true;
+                        mesh.userData.isLevelObject = true;
+                        scene.add(mesh);
                     } else if (mazeMap[z][x] === 2) {
-                        mesh = new THREE.Mesh(goalGeo, goalMat);
+                        const mesh = new THREE.Mesh(goalGeo, goalMat);
                         mesh.position.set((x+0.5) * TILE_SIZE, WALL_HEIGHT/2, (z+0.5) * TILE_SIZE);
-                        // Add a strong light to the goal
                         const goalLight = new THREE.PointLight(0xff0000, 2, TILE_SIZE*3);
                         goalLight.position.y = 2;
                         mesh.add(goalLight);
-                    }
-
-                    if(mesh) {
-                        mesh.userData.isLevelObject = true; // Tag for cleanup
+                        mesh.userData.isLevelObject = true;
                         scene.add(mesh);
                     }
                 }
             }
         }
 
-        // BFS Pathfinding to generate hints
         function findPath(start, end) {
             let queue = [start];
             let visited = new Set();
@@ -385,9 +366,7 @@
             let headIndex = 0;
             while(headIndex < queue.length) {
                 let current = queue[headIndex++];
-
                 if(current.gridX === end.gridX && current.gridZ === end.gridZ) {
-                    // Path found, reconstruct it
                     let path = [];
                     let temp = current;
                     while(temp) {
@@ -396,16 +375,12 @@
                     }
                     return path;
                 }
-
-                // Check neighbors (Up, Down, Left, Right)
                 const neighbors = [
                     {gridX: current.gridX+1, gridZ: current.gridZ}, {gridX: current.gridX-1, gridZ: current.gridZ},
                     {gridX: current.gridX, gridZ: current.gridZ+1}, {gridX: current.gridX, gridZ: current.gridZ-1}
                 ];
-
                 for(let neighbor of neighbors) {
                     let key = `${neighbor.gridX},${neighbor.gridZ}`;
-                    // Check bounds and if it's walkable (0 or 2)
                     if(neighbor.gridX >= 0 && neighbor.gridX < MAZE_SIZE &&
                        neighbor.gridZ >= 0 && neighbor.gridZ < MAZE_SIZE &&
                        mazeMap[neighbor.gridZ][neighbor.gridX] !== 1 &&
@@ -416,76 +391,55 @@
                     }
                 }
             }
-            return null; // No path found
+            return null;
         }
 
         function generateHints() {
             const path = findPath(startPos, goalPos);
             if(!path) return;
-
             const hintGeo = new THREE.SphereGeometry(0.5, 8, 8);
             const hintMat = new THREE.MeshBasicMaterial({ color: 0xffff00 });
-
-            // Place hints every few steps along the path, skipping start/end
             for(let i = 2; i < path.length - 1; i += 2) {
                 const node = path[i];
                 const hintMesh = new THREE.Mesh(hintGeo, hintMat);
                 hintMesh.position.set((node.gridX+0.5)*TILE_SIZE, 2, (node.gridZ+0.5)*TILE_SIZE);
-                
-                // Small light for the hint
                 const hintLight = new THREE.PointLight(0xffff00, 0.5, TILE_SIZE * 1.5);
                 hintMesh.add(hintLight);
-                
                 hintMesh.userData.isLevelObject = true;
                 scene.add(hintMesh);
                 hintObjects.push(hintMesh);
             }
         }
 
-
-        // --- GAME LOOP ---
+        // --- ANIMATION & PHYSICS ---
         function animate() {
             requestAnimationFrame(animate);
 
             if(gameActive) {
                 updateMovement();
-                // Animate hints (bobbing up and down)
                 const time = Date.now() * 0.003;
                 hintObjects.forEach((h, index) => {
                     h.position.y = 2 + Math.sin(time + index) * 0.5;
                 });
             }
 
-            // Update Camera position relative to player
             camera.position.set(player.x, WALL_HEIGHT * 0.4, player.z);
-            // Apply rotation. Look control dictates Y rotation.
-            camera.rotation.set(0, player.rotation, 0); // Important: reset X/Z rotation
-            
+            camera.rotation.set(0, player.rotation, 0); 
             renderer.render(scene, camera);
         }
 
-
-        // --- MOVEMENT & COLLISION LOGIC ---
         function updateMovement() {
-             // 1. Handle Rotation from Joystick (Left/Right on stick)
             if (joystick.active) {
                 const turnSpeed = -(joystick.dx / 75) * TURN_SPEED_JOYSTICK;
                 player.rotation += turnSpeed;
-            }
-
-            // 2. Handle Forward/Backward Movement from Joystick
-            if (joystick.active) {
-                // Calculate intended speed vector based on rotation
+                
                 const moveSpeed = -(joystick.dy / 75) * MOVEMENT_SPEED;
                 const deltaX = -Math.sin(player.rotation) * moveSpeed;
                 const deltaZ = -Math.cos(player.rotation) * moveSpeed;
 
-                // Attempts to move along X axis, then Z axis independently (sliding collision)
                 tryMove(deltaX, 0);
                 tryMove(0, deltaZ);
             }
-
-            // Check Win Condition
             const currentGridX = Math.floor(player.x / TILE_SIZE);
             const currentGridZ = Math.floor(player.z / TILE_SIZE);
             if(mazeMap[currentGridZ][currentGridX] === 2) {
@@ -493,59 +447,31 @@
             }
         }
 
-        // Tries to move the player by dx, dz. Stops if collision occurs.
         function tryMove(dx, dz) {
             const nextX = player.x + dx;
             const nextZ = player.z + dz;
-
-            // Find grid coordinates of the bounding box of the proposed position
-            // We check a slightly larger area to ensure we don't clip corners
             const minGridX = Math.floor((nextX - PLAYER_RADIUS) / TILE_SIZE);
             const maxGridX = Math.floor((nextX + PLAYER_RADIUS) / TILE_SIZE);
             const minGridZ = Math.floor((nextZ - PLAYER_RADIUS) / TILE_SIZE);
             const maxGridZ = Math.floor((nextZ + PLAYER_RADIUS) / TILE_SIZE);
 
-            // Iterate over nearby grid cells to check for wall collisions
             for(let gz = minGridZ; gz <= maxGridZ; gz++) {
                 for(let gx = minGridX; gx <= maxGridX; gx++) {
-                    // If grid coordinate is out of bounds or is a wall
                     if(gz < 0 || gz >= MAZE_SIZE || gx < 0 || gx >= MAZE_SIZE || mazeMap[gz][gx] === 1) {
-                        // Calculate absolute bounds of that wall tile
-                        const wallMinX = gx * TILE_SIZE;
-                        const wallMaxX = (gx + 1) * TILE_SIZE;
-                        const wallMinZ = gz * TILE_SIZE;
-                        const wallMaxZ = (gz + 1) * TILE_SIZE;
-
-                        // Circle vs Axis-Aligned Box collision check
-                        // Find the closest point on the wall box to the player's center
-                        const closestX = Math.max(wallMinX, Math.min(nextX, wallMaxX));
-                        const closestZ = Math.max(wallMinZ, Math.min(nextZ, wallMaxZ));
-
-                        // Calculate distance from player center to that closest point
-                        const distanceX = nextX - closestX;
-                        const distanceZ = nextZ - closestZ;
-                        const distanceSquared = (distanceX * distanceX) + (distanceZ * distanceZ);
-
-                        // If distance is less than radius squared, a collision occurs.
-                        if (distanceSquared < (PLAYER_RADIUS * PLAYER_RADIUS)) {
-                            // Collision detected, do not update position for this axis movement
-                            return; 
-                        }
+                        const closestX = Math.max(gx * TILE_SIZE, Math.min(nextX, (gx+1) * TILE_SIZE));
+                        const closestZ = Math.max(gz * TILE_SIZE, Math.min(nextZ, (gz+1) * TILE_SIZE));
+                        const distSq = (nextX - closestX)**2 + (nextZ - closestZ)**2;
+                        if (distSq < PLAYER_RADIUS**2) return; 
                     }
                 }
             }
-
-            // If no collision hit, apply the move
             player.x = nextX;
             player.z = nextZ;
         }
 
-
-        // --- INPUT HANDLING ---
+        // --- CONTROLS ---
         function setupControls() {
-            // --- Joystick (Movement) ---
-            const handle JoyStart = (e) => {
-                // Important: stop propagation so this touch doesn't trigger "look" control
+            const handleJoyStart = (e) => { // FIXED SYNTAX HERE
                 e.stopPropagation(); 
                 const touch = e.targetTouches ? e.targetTouches[0] : e;
                 joystick.active = true;
@@ -556,17 +482,15 @@
 
             const handleJoyMove = (e) => {
                 if (!joystick.active) return;
-                e.preventDefault(); // Prevent scrolling
+                e.preventDefault(); 
                 const touch = e.targetTouches ? e.targetTouches[0] : e;
-                
                 let dx = touch.clientX - joystick.originX;
                 let dy = touch.clientY - joystick.originY;
-                
-                const distance = Math.sqrt(dx*dx + dy*dy);
-                const maxDist = 75;
-                if(distance > maxDist) {
-                    dx = (dx / distance) * maxDist;
-                    dy = (dy / distance) * maxDist;
+                const dist = Math.sqrt(dx*dx + dy*dy);
+                const maxDist = 70;
+                if(dist > maxDist) {
+                    dx = (dx / dist) * maxDist;
+                    dy = (dy / dist) * maxDist;
                 }
                 joystick.dx = dx;
                 joystick.dy = dy;
@@ -586,9 +510,13 @@
             zone.addEventListener('touchend', handleJoyEnd);
             zone.addEventListener('touchcancel', handleJoyEnd);
 
-            // --- Touch Surface (Look Around) ---
+            // Desktop Mouse Joystick
+            zone.addEventListener('mousedown', (e) => { handleJoyStart(e); });
+            window.addEventListener('mousemove', (e) => { if(joystick.active) handleJoyMove(e); });
+            window.addEventListener('mouseup', handleJoyEnd);
+
+            // Look Controls
             touchSurface.addEventListener('touchstart', (e) => {
-                 // Only track the first touch on the surface for looking
                 if(e.targetTouches.length === 1) {
                     lookControl.active = true;
                     lookControl.lastX = e.targetTouches[0].clientX;
@@ -600,7 +528,6 @@
                      e.preventDefault();
                     const clientX = e.targetTouches[0].clientX;
                     const deltaX = clientX - lookControl.lastX;
-                    // Invert deltaX for natural drag-to-turn feeling
                     player.rotation -= deltaX * TURN_SPEED_TOUCH;
                     lookControl.lastX = clientX;
                 }
@@ -609,49 +536,36 @@
              const endLook = () => { lookControl.active = false; };
              touchSurface.addEventListener('touchend', endLook);
              touchSurface.addEventListener('touchcancel', endLook);
+             
+             // Mouse Look
+             touchSurface.addEventListener('mousedown', (e) => { lookControl.active=true; lookControl.lastX=e.clientX; });
+             touchSurface.addEventListener('mousemove', (e) => {
+                 if(lookControl.active) {
+                     const deltaX = e.clientX - lookControl.lastX;
+                     player.rotation -= deltaX * TURN_SPEED_TOUCH;
+                     lookControl.lastX = e.clientX;
+                 }
+             });
+             window.addEventListener('mouseup', () => lookControl.active = false);
         }
 
-        // --- PROCEDURAL AUDIO (Atmospheric Drone) ---
         function initAudio() {
             const AudioContext = window.AudioContext || window.webkitAudioContext;
             audioCtx = new AudioContext();
-            
             mainGainNode = audioCtx.createGain();
-            mainGainNode.gain.value = 0; // Start silent
+            mainGainNode.gain.value = 0; 
             mainGainNode.connect(audioCtx.destination);
-
-            // Create two oscillators for a dissonant drone
             const osc1 = audioCtx.createOscillator();
-            osc1.type = 'sine';
-            osc1.frequency.value = 55; // A1
-
+            osc1.type = 'sine'; osc1.frequency.value = 55;
             const osc2 = audioCtx.createOscillator();
-            osc2.type = 'triangle';
-            osc2.frequency.value = 58; // Slightly detuned
-
-            // Filter them heavily
+            osc2.type = 'triangle'; osc2.frequency.value = 58;
             const filter = audioCtx.createBiquadFilter();
-            filter.type = 'lowpass';
-            filter.frequency.value = 200;
-
-            osc1.connect(filter);
-            osc2.connect(filter);
+            filter.type = 'lowpass'; filter.frequency.value = 200;
+            osc1.connect(filter); osc2.connect(filter);
             filter.connect(mainGainNode);
-
-            osc1.start();
-            osc2.start();
-
-            // Add some subtle LFO modulation to the filter for movement
-            const lfo = audioCtx.createOscillator();
-            lfo.frequency.value = 0.1; // Very slow
-            const lfoGain = audioCtx.createGain();
-            lfoGain.gain.value = 50; // Modulation depth
-            lfo.connect(lfoGain);
-            lfoGain.connect(filter.frequency);
-            lfo.start();
+            osc1.start(); osc2.start();
         }
 
-        // Resize handler
         window.addEventListener('resize', () => {
             camera.aspect = window.innerWidth / window.innerHeight;
             camera.updateProjectionMatrix();
